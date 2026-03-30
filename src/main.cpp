@@ -49,6 +49,10 @@ unsigned long lastTouchRefreshMillis = 0;
 uint8_t weatherInfoMode = 0;
 unsigned long lastWeatherInfoSwitchMillis = 0;
 
+uint8_t currentLocationIndex = 0;
+String currentLocationName = LOCATIONS[0].displayName;
+String currentLocationId = LOCATIONS[0].locationId;
+
 // ----------------------------------------------------------------------------
 // Function prototypes (declarations)
 // ----------------------------------------------------------------------------
@@ -77,6 +81,9 @@ void drawWeatherInfoBlock();
 void redrawScreenFromCache();
 void updateDataInBackground();
 void initialPaint();
+
+void switchToNextLocation();
+bool isTouchInLocationArea(uint16_t x, uint16_t y);
 
 Task clockTask(1000, TASK_FOREVER, &drawTimeAndDate);
 
@@ -257,11 +264,23 @@ void handleTouchWake() {
 
   log_i("Touch coordinates: x=%d, y=%d", touchX, touchY);
 
-  if ((millis() - lastTouchRefreshMillis) > TOUCH_REFRESH_DEBOUNCE_MS) {
-    lastTouchRefreshMillis = millis();
-    log_i("Manual refresh triggered by touch.");
-    repaint();
+  // Debounce all touch actions
+  if ((millis() - lastTouchRefreshMillis) <= TOUCH_REFRESH_DEBOUNCE_MS) {
+    return;
   }
+
+  // If the touch is on the location name area, switch to next location
+  if (isTouchInLocationArea(touchX, touchY)) {
+    lastTouchRefreshMillis = millis();
+    log_i("Location area touched. Switching location.");
+    switchToNextLocation();
+    return;
+  }
+
+  // Otherwise, normal manual refresh
+  lastTouchRefreshMillis = millis();
+  log_i("Manual refresh triggered by touch.");
+  repaint();
 }
 
 void setup(void) {
@@ -352,7 +371,7 @@ void drawCurrentWeather() {
   ui.drawBmp("/weather/" + weatherIcon + ".bmp", 5, 125);
 
   // location name with dynamic font size
-  String locationText = DISPLAYED_LOCATION_NAME;
+  String locationText = currentLocationName;
   if (locationText.length() <= 10) {
     ofr.setFontSize(16);
   } else if (locationText.length() <= 16) {
@@ -605,7 +624,7 @@ void updateData(boolean updateProgressBar) {
   OpenWeatherMapCurrent *currentWeatherClient = new OpenWeatherMapCurrent();
   currentWeatherClient->setMetric(IS_METRIC);
   currentWeatherClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
-  currentWeatherClient->updateCurrentById(&currentWeather, OPEN_WEATHER_MAP_API_KEY, OPEN_WEATHER_MAP_LOCATION_ID);
+  currentWeatherClient->updateCurrentById(&currentWeather, OPEN_WEATHER_MAP_API_KEY, currentLocationId);
   delete currentWeatherClient;
   currentWeatherClient = nullptr;
   log_i("Current weather in %s: %s, %.1f°", currentWeather.cityName.c_str(), currentWeather.description.c_str(), currentWeather.feelsLike);
@@ -615,7 +634,24 @@ void updateData(boolean updateProgressBar) {
   forecastClient->setMetric(IS_METRIC);
   forecastClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
   forecastClient->setAllowedHours(forecastHoursUtc, sizeof(forecastHoursUtc));
-  forecastClient->updateForecastsById(forecasts, OPEN_WEATHER_MAP_API_KEY, OPEN_WEATHER_MAP_LOCATION_ID, NUMBER_OF_FORECASTS);
+  forecastClient->updateForecastsById(forecasts, OPEN_WEATHER_MAP_API_KEY, currentLocationId, NUMBER_OF_FORECASTS);
   delete forecastClient;
   forecastClient = nullptr;
+}
+
+void switchToNextLocation() {
+  currentLocationIndex = (currentLocationIndex + 1) % NUMBER_OF_LOCATIONS;
+  currentLocationName = LOCATIONS[currentLocationIndex].displayName;
+  currentLocationId = LOCATIONS[currentLocationIndex].locationId;
+
+  log_i("Switched to location: %s (%s)",
+        currentLocationName.c_str(),
+        currentLocationId.c_str());
+
+  repaint();
+}
+
+bool isTouchInLocationArea(uint16_t x, uint16_t y) {
+  // tune these values on hardware
+  return (x >= 70 && x <= 250 && y >= 85 && y <= 115);
 }

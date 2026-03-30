@@ -13,8 +13,8 @@
 //#include "translations/texts_nl.h"
 
 // WiFi Settings
-const char *SSID = "your-wifi-ssid-here";
-const char *WIFI_PWD = "your-wifi-password-here";
+const char *SSID = "BLASTER";
+const char *WIFI_PWD = "D3vH=NS+D5%pu$brryA%f=z";
 
 // timezone Europe/Berlin as per https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
 #define TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
@@ -30,7 +30,7 @@ bool IS_METRIC = true;
 
 // OpenWeatherMap Settings
 // Sign up here to get an API key: https://docs.thingpulse.com/how-tos/openweathermap-key/
-const String OPEN_WEATHER_MAP_API_KEY = "your-api-key-here";
+const String OPEN_WEATHER_MAP_API_KEY = "f67f9f7dd1b7cb5fbb67ce399d229753";
 
 /*
 Go to https://openweathermap.org/find?q= and search for a location. Go through the
@@ -38,17 +38,33 @@ result set and select the entry closest to the actual location you want to displ
 data for. It'll be a URL like https://openweathermap.org/city/2657896. The number
 at the end is what you assign to the constant below.
  */
+//Define a location struct and list
 
+//const String OPEN_WEATHER_MAP_LOCATION_ID = "2944200";
+//const String DISPLAYED_LOCATION_NAME = "BRETTEN";
 //const String OPEN_WEATHER_MAP_LOCATION_ID = "4887398";
 //const String DISPLAYED_LOCATION_NAME = "CHICAGO";
-//String OPEN_WEATHER_MAP_LOCATION_ID = "2147714";
-//String DISPLAYED_LOCATION_NAME = "Sydney";
-//String OPEN_WEATHER_MAP_LOCATION_ID = "5879400";
-//String DISPLAYED_LOCATION_NAME = "Anchorage";
-String OPEN_WEATHER_MAP_LOCATION_ID = "3494242";
-String DISPLAYED_LOCATION_NAME = "PUNTA CANA";
+//String OPEN_WEATHER_MAP_LOCATION_ID = "5308655";
+//String DISPLAYED_LOCATION_NAME = "PHOENIX";
+//String OPEN_WEATHER_MAP_LOCATION_ID = "4889447";
+//String DISPLAYED_LOCATION_NAME = "DARIEN";
+//String OPEN_WEATHER_MAP_LOCATION_ID = "3494242";
+//String DISPLAYED_LOCATION_NAME = "PUNTA CANA";
 
+typedef struct {
+  String displayName;
+  String locationId;
+} LocationDef;
 
+const LocationDef LOCATIONS[] = {
+  {"BRETTEN", "2944200"},
+  {"CHICAGO", "4887398"},
+  {"PHOENIX", "5308655"},
+  {"DARIEN", "4889447"},
+  {"PUNTA CANA", "3494242"}
+};
+
+const uint8_t NUMBER_OF_LOCATIONS = sizeof(LOCATIONS) / sizeof(LOCATIONS[0]);
 
 // screen brightness settings
 #define DISPLAY_DYNAMIC_BRIGHTNESS_ENABLED true
