@@ -13,8 +13,8 @@
 //#include "translations/texts_nl.h"
 
 // WiFi Settings
-const char *SSID = "BLASTER";
-const char *WIFI_PWD = "D3vH=NS+D5%pu$brryA%f=z";
+const char *SSID = "your-wifi-SSID-here";
+const char *WIFI_PWD = "your-wifi-password-here";
 
 // timezone Europe/Berlin as per https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
 #define TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
@@ -30,7 +30,7 @@ bool IS_METRIC = true;
 
 // OpenWeatherMap Settings
 // Sign up here to get an API key: https://docs.thingpulse.com/how-tos/openweathermap-key/
-const String OPEN_WEATHER_MAP_API_KEY = "f67f9f7dd1b7cb5fbb67ce399d229753";
+const String OPEN_WEATHER_MAP_API_KEY = "your-openweather-api-key-here";
 
 /*
 Go to https://openweathermap.org/find?q= and search for a location. Go through the
@@ -39,29 +39,18 @@ data for. It'll be a URL like https://openweathermap.org/city/2657896. The numbe
 at the end is what you assign to the constant below.
  */
 //Define a location struct and list
-
-//const String OPEN_WEATHER_MAP_LOCATION_ID = "2944200";
-//const String DISPLAYED_LOCATION_NAME = "BRETTEN";
-//const String OPEN_WEATHER_MAP_LOCATION_ID = "4887398";
-//const String DISPLAYED_LOCATION_NAME = "CHICAGO";
-//String OPEN_WEATHER_MAP_LOCATION_ID = "5308655";
-//String DISPLAYED_LOCATION_NAME = "PHOENIX";
-//String OPEN_WEATHER_MAP_LOCATION_ID = "4889447";
-//String DISPLAYED_LOCATION_NAME = "DARIEN";
-//String OPEN_WEATHER_MAP_LOCATION_ID = "3494242";
-//String DISPLAYED_LOCATION_NAME = "PUNTA CANA";
-
 typedef struct {
   String displayName;
   String locationId;
+  const char* timezone;
 } LocationDef;
 
+// Define a location list (Display Name, Openweather locationId and ESP32-friendly POSIX Timezone String )
 const LocationDef LOCATIONS[] = {
-  {"BRETTEN", "2944200"},
-  {"CHICAGO", "4887398"},
-  {"PHOENIX", "5308655"},
-  {"DARIEN", "4889447"},
-  {"PUNTA CANA", "3494242"}
+  {"Monheim",   "2866930", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Rome",      "3169070", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Sydney",    "2147714", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+  {"Anchorage", "5879400", "AKST9AKDT,M3.2.0,M11.1.0"}
 };
 
 const uint8_t NUMBER_OF_LOCATIONS = sizeof(LOCATIONS) / sizeof(LOCATIONS[0]);
@@ -75,10 +64,13 @@ const uint8_t NUMBER_OF_LOCATIONS = sizeof(LOCATIONS) / sizeof(LOCATIONS[0]);
 #define TFT_LED_BRIGHTNESS_EVENING 80
 #define TFT_LED_BRIGHTNESS_NIGHT   10
 
+#define DISPLAY_EVENING_FROM_HOUR   18
+#define DISPLAY_EVENING_FROM_MINUTE 0
+
 // startup brightness
 #define TFT_LED_BRIGHTNESS TFT_LED_BRIGHTNESS_DAY
 
-// fixed night-off window
+// fixed night window
 #define DISPLAY_NIGHT_FROM_HOUR    0
 #define DISPLAY_NIGHT_FROM_MINUTE  0
 #define DISPLAY_NIGHT_TO_HOUR      5

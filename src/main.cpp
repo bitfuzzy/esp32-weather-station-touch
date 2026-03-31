@@ -40,6 +40,7 @@ unsigned long lastUpdateMillis = 0;
 const int16_t centerWidth = tft.width() / 2;
 
 OpenWeatherMapCurrentData currentWeather;
+OpenWeatherMapCurrentData primaryLocationWeather;
 OpenWeatherMapForecastData forecasts[NUMBER_OF_FORECASTS];
 
 Scheduler scheduler;
@@ -52,6 +53,7 @@ unsigned long lastWeatherInfoSwitchMillis = 0;
 uint8_t currentLocationIndex = 0;
 String currentLocationName = LOCATIONS[0].displayName;
 String currentLocationId = LOCATIONS[0].locationId;
+const char* currentLocationTimezone = LOCATIONS[0].timezone;
 
 // ----------------------------------------------------------------------------
 // Function prototypes (declarations)
@@ -68,10 +70,12 @@ bool pushImageToTft(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitm
 void syncTime();
 void repaint();
 void updateData(boolean updateProgressBar);
+void updatePrimaryLocationData();
 
 bool isNightModeTime();
 bool isSunDown();
 uint8_t getTargetBrightness();
+bool isPrimaryLocationSunDown();
 void handleDisplayBrightnessMode();
 void handleTouchWake();
 
@@ -225,13 +229,13 @@ uint8_t getTargetBrightness() {
     return TFT_LED_BRIGHTNESS_NIGHT;
   }
 
-  // fixed night brightness
+  // fixed local night brightness window
   if (DISPLAY_NIGHT_MODE_ENABLED && isNightModeTime()) {
     return TFT_LED_BRIGHTNESS_NIGHT;
   }
 
-  // sunrise/sunset-based dimming
-  if (DISPLAY_DYNAMIC_BRIGHTNESS_ENABLED && isSunDown()) {
+  // evening brightness based on PRIMARY location sunset/sunrise
+  if (DISPLAY_DYNAMIC_BRIGHTNESS_ENABLED && isPrimaryLocationSunDown()) {
     return TFT_LED_BRIGHTNESS_EVENING;
   }
 
@@ -537,7 +541,7 @@ bool pushImageToTft(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitm
 void syncTime() {
   if (initTime()) {
     lastTimeSyncMillis = millis();
-    setTimezone(TIMEZONE);
+    setTimezone(currentLocationTimezone);
     log_i("Current local time: %s", getCurrentTimestamp(SYSTEM_TIMESTAMP_FORMAT).c_str());
   }
 }
@@ -559,6 +563,7 @@ void initialPaint() {
   syncTime();
 
   updateData(true);
+  updatePrimaryLocationData();
 
   drawProgress("Ready", 100);
   lastUpdateMillis = millis();
@@ -615,6 +620,7 @@ void updateDataInBackground() {
 
   syncTime();
   updateData(false);
+  updatePrimaryLocationData();
 
   lastUpdateMillis = millis();
 }
@@ -639,14 +645,38 @@ void updateData(boolean updateProgressBar) {
   forecastClient = nullptr;
 }
 
+void updatePrimaryLocationData() {
+  OpenWeatherMapCurrent *primaryWeatherClient = new OpenWeatherMapCurrent();
+  primaryWeatherClient->setMetric(IS_METRIC);
+  primaryWeatherClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
+
+  primaryWeatherClient->updateCurrentById(
+    &primaryLocationWeather,
+    OPEN_WEATHER_MAP_API_KEY,
+    LOCATIONS[0].locationId
+  );
+
+  delete primaryWeatherClient;
+  primaryWeatherClient = nullptr;
+
+  log_i("Primary location weather updated: %s, sunrise=%ld, sunset=%ld",
+        LOCATIONS[0].displayName.c_str(),
+        primaryLocationWeather.sunrise,
+        primaryLocationWeather.sunset);
+}
+
 void switchToNextLocation() {
   currentLocationIndex = (currentLocationIndex + 1) % NUMBER_OF_LOCATIONS;
   currentLocationName = LOCATIONS[currentLocationIndex].displayName;
   currentLocationId = LOCATIONS[currentLocationIndex].locationId;
+  currentLocationTimezone = LOCATIONS[currentLocationIndex].timezone;
 
-  log_i("Switched to location: %s (%s)",
+  setTimezone(currentLocationTimezone);
+
+  log_i("Switched to location: %s (%s), timezone=%s",
         currentLocationName.c_str(),
-        currentLocationId.c_str());
+        currentLocationId.c_str(),
+        currentLocationTimezone);
 
   repaint();
 }
@@ -654,4 +684,17 @@ void switchToNextLocation() {
 bool isTouchInLocationArea(uint16_t x, uint16_t y) {
   // tune these values on hardware
   return (x >= 70 && x <= 250 && y >= 85 && y <= 115);
+}
+
+bool isPrimaryLocationSunDown() {
+  time_t now = time(nullptr);
+  if (now <= 0) {
+    return false;
+  }
+
+  if (primaryLocationWeather.sunrise <= 0 || primaryLocationWeather.sunset <= 0) {
+    return false;
+  }
+
+  return (now < primaryLocationWeather.sunrise || now >= primaryLocationWeather.sunset);
 }

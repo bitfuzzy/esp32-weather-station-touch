@@ -20,11 +20,23 @@ See the documentation at https://docs.thingpulse.com/guides/esp32-color-kit-gran
 This fork adds several usability and display improvements for the ESP32 WiFi Color Display Kit Grande weather station:
 
 - configurable day / evening / night brightness
-- optional dynamic brightness based on sunrise / sunset
+- optional dynamic evening dimming based on the sunset of a primary location
+- fixed night brightness window
+- test override to force night brightness for tuning
 - touch refresh
 - touch-based switching between predefined locations
+- per-location timezone switching for the displayed clock
 - rotating current temperature / feels-like view
 - multilingual feels-like label support (EN / DE / IT / NL)
 - dynamic text sizing for long weather descriptions and location names
 - improved current weather layout and spacing
 - fallback handling for unsupported special glyphs (e.g. German ß -> ss)
+
+## Multi-location behavior
+
+- LOCATIONS[0] is treated as the primary/home location
+- the primary location controls evening dimming via sunrise/sunset
+- the currently selected location controls:
+  - displayed weather
+  - displayed local time
+  - displayed location name
