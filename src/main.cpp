@@ -33,15 +33,18 @@ TFT_eSprite timeSprite = TFT_eSprite(&tft);
 GfxUi ui = GfxUi(&tft, &ofr);
 
 // time management variables
-int updateIntervalMillis = UPDATE_INTERVAL_MINUTES * 60 * 1000;
+int lastScheduledUpdateKey = -1;
 unsigned long lastTimeSyncMillis = 0;
 unsigned long lastUpdateMillis = 0;
 
 const int16_t centerWidth = tft.width() / 2;
 
-OpenWeatherMapCurrentData currentWeather;
 OpenWeatherMapCurrentData primaryLocationWeather;
-OpenWeatherMapForecastData forecasts[NUMBER_OF_FORECASTS];
+OpenWeatherMapCurrentData locationCurrentWeather[NUMBER_OF_LOCATIONS];
+OpenWeatherMapForecastData locationForecasts[NUMBER_OF_LOCATIONS][NUMBER_OF_FORECASTS];
+
+bool locationHasData[NUMBER_OF_LOCATIONS] = {false};
+unsigned long locationLastUpdateMillis[NUMBER_OF_LOCATIONS] = {0};
 
 Scheduler scheduler;
 uint8_t currentBacklightBrightness = 255;
@@ -51,9 +54,6 @@ uint8_t weatherInfoMode = 0;
 unsigned long lastWeatherInfoSwitchMillis = 0;
 
 uint8_t currentLocationIndex = 0;
-String currentLocationName = LOCATIONS[0].displayName;
-String currentLocationId = LOCATIONS[0].locationId;
-const char* currentLocationTimezone = LOCATIONS[0].timezone;
 
 // ----------------------------------------------------------------------------
 // Function prototypes (declarations)
@@ -69,15 +69,15 @@ void initOpenFontRender();
 bool pushImageToTft(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
 void syncTime();
 void repaint();
-void updateData(boolean updateProgressBar);
 void updatePrimaryLocationData();
 
-bool isNightModeTime();
-bool isSunDown();
 uint8_t getTargetBrightness();
 bool isPrimaryLocationSunDown();
 void handleDisplayBrightnessMode();
 void handleTouchWake();
+bool isPrimaryLocationNightTime();
+int getMinutesForTimezone(const char* timezone);
+bool shouldRunScheduledUpdate();
 
 void handleWeatherInfoRotation();
 void drawWeatherInfoBlock();
@@ -89,12 +89,56 @@ void initialPaint();
 void switchToNextLocation();
 bool isTouchInLocationArea(uint16_t x, uint16_t y);
 
+void refreshCurrentLocationFromTouch();
+
+void updateLocationData(uint8_t locationIndex);
+
+void drawStatusOverlay(const String& message);
+void drawRefreshingOverlay();
+void drawSwitchingLocationOverlay();
+
+OpenWeatherMapCurrentData& activeWeather();
+OpenWeatherMapForecastData* activeForecasts();
+
 Task clockTask(1000, TASK_FOREVER, &drawTimeAndDate);
 
 
 // ----------------------------------------------------------------------------
 // helper functions for dynamic brightness and setup() & loop()
 // ----------------------------------------------------------------------------
+
+bool shouldRunScheduledUpdate() {
+  // safety fallback for first run
+  if (lastUpdateMillis == 0) {
+    return true;
+  }
+
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    log_e("Failed to obtain time for scheduled update check.");
+    return false;
+  }
+
+  int updatesPerHour = UPDATES_PER_HOUR;
+  if (updatesPerHour < 1) updatesPerHour = 1;
+  if (updatesPerHour > 4) updatesPerHour = 4;
+
+  int intervalMinutes = 60 / updatesPerHour;
+
+  if ((timeinfo.tm_min % intervalMinutes) != 0) {
+    return false;
+  }
+
+  // unique key for current scheduled slot
+  int currentKey = ((timeinfo.tm_yday * 24 + timeinfo.tm_hour) * 100) + timeinfo.tm_min;
+
+  if (currentKey == lastScheduledUpdateKey) {
+    return false;
+  }
+
+  lastScheduledUpdateKey = currentKey;
+  return true;
+}
 
 void drawWeatherInfoBlock() {
   String text = "";
@@ -110,14 +154,14 @@ void drawWeatherInfoBlock() {
   if (weatherInfoMode == 0) {
     // actual temperature
     ofr.setFontSize(44);
-    text = String(currentWeather.temp, 1) + "°";
+    text = String(activeWeather().temp, 1) + "°";
     ofr.cdrawString(text.c_str(), centerWidth + 10, 145);
 
     // humidity + pressure on one row with custom dot separator
     ofr.setFontSize(16);
 
-    String hum = String(currentWeather.humidity) + "%";
-    String pres = String(currentWeather.pressure) + "hPa";
+    String hum = String(activeWeather().humidity) + "%";
+    String pres = String(activeWeather().pressure) + "hPa";
 
     int infoY = 195;
 
@@ -141,7 +185,7 @@ void drawWeatherInfoBlock() {
   } else {
     // feels like temperature
     ofr.setFontSize(44);
-    String feelsLikeTemp = String(currentWeather.feelsLike, 1) + "°";
+    String feelsLikeTemp = String(activeWeather().feelsLike, 1) + "°";
     ofr.cdrawString(feelsLikeTemp.c_str(), centerWidth + 10, 145);
 
     // second line label
@@ -159,11 +203,40 @@ void drawWeatherInfoBlock() {
   }
 }
 
+void drawStatusOverlay(const String& message) {
+  ofr.setFontSize(16);
+
+  int textWidth = ofr.getTextWidth(message.c_str());
+  int paddingX = 18;
+  int boxW = textWidth + (paddingX * 2);
+  int boxH = 28;
+
+  // keep box within screen bounds
+  if (boxW > (tft.width() - 20)) {
+    boxW = tft.width() - 20;
+  }
+
+  int boxX = (tft.width() - boxW) / 2;
+  int boxY = 215;
+
+  tft.fillRoundRect(boxX, boxY, boxW, boxH, 6, TFT_BLACK);
+  tft.drawRoundRect(boxX, boxY, boxW, boxH, 6, TFT_WHITE);
+
+  ofr.cdrawString(message.c_str(), centerWidth, boxY + 6);
+}
+
+void drawRefreshingOverlay() {
+  drawStatusOverlay(REFRESHING_LABEL);
+}
+
+void drawSwitchingLocationOverlay() {
+  drawStatusOverlay(SWITCHING_LOCATION_LABEL);
+}
+
 void handleWeatherInfoRotation() {
   if (!WEATHER_INFO_ROTATION_ENABLED) {
     return;
   }
-
 
   if ((millis() - lastWeatherInfoSwitchMillis) >= WEATHER_INFO_ROTATION_INTERVAL_MS) {
     lastWeatherInfoSwitchMillis = millis();
@@ -184,43 +257,27 @@ void handleWeatherInfoRotation() {
   }
 }
 
-bool isNightModeTime() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    log_e("Failed to obtain time for display night mode check.");
-    return false;
-  }
-
-  int nowMinutes  = timeinfo.tm_hour * 60 + timeinfo.tm_min;
-  int fromMinutes = DISPLAY_NIGHT_FROM_HOUR * 60 + DISPLAY_NIGHT_FROM_MINUTE;
-  int toMinutes   = DISPLAY_NIGHT_TO_HOUR * 60 + DISPLAY_NIGHT_TO_MINUTE;
-
-  // same start/end means disabled
-  if (fromMinutes == toMinutes) {
-    return false;
-  }
-
-  // same-day range
-  if (fromMinutes < toMinutes) {
-    return nowMinutes >= fromMinutes && nowMinutes < toMinutes;
-  }
-
-  // overnight range
-  return nowMinutes >= fromMinutes || nowMinutes < toMinutes;
-}
-
-bool isSunDown() {
+int getMinutesForTimezone(const char* timezone) {
   time_t now = time(nullptr);
   if (now <= 0) {
-    return false;
+    return -1;
   }
 
-  // sunrise/sunset come from current weather data
-  if (currentWeather.sunrise <= 0 || currentWeather.sunset <= 0) {
-    return false;
+  // temporarily switch timezone to evaluate local time for the given location
+  setenv("TZ", timezone, 1);
+  tzset();
+
+  struct tm *timeinfo = localtime(&now);
+  int minutes = -1;
+  if (timeinfo != nullptr) {
+    minutes = timeinfo->tm_hour * 60 + timeinfo->tm_min;
   }
 
-  return (now < currentWeather.sunrise || now >= currentWeather.sunset);
+  // restore currently displayed location timezone
+  setenv("TZ", LOCATIONS[currentLocationIndex].timezone, 1);
+  tzset();
+
+  return minutes;
 }
 
 uint8_t getTargetBrightness() {
@@ -229,12 +286,12 @@ uint8_t getTargetBrightness() {
     return TFT_LED_BRIGHTNESS_NIGHT;
   }
 
-  // fixed local night brightness window
-  if (DISPLAY_NIGHT_MODE_ENABLED && isNightModeTime()) {
+  // fixed night brightness window based on PRIMARY location timezone
+  if (DISPLAY_NIGHT_MODE_ENABLED && isPrimaryLocationNightTime()) {
     return TFT_LED_BRIGHTNESS_NIGHT;
   }
 
-  // evening brightness based on PRIMARY location sunset/sunrise
+  // evening brightness based on PRIMARY location sunrise/sunset
   if (DISPLAY_DYNAMIC_BRIGHTNESS_ENABLED && isPrimaryLocationSunDown()) {
     return TFT_LED_BRIGHTNESS_EVENING;
   }
@@ -268,23 +325,39 @@ void handleTouchWake() {
 
   log_i("Touch coordinates: x=%d, y=%d", touchX, touchY);
 
-  // Debounce all touch actions
   if ((millis() - lastTouchRefreshMillis) <= TOUCH_REFRESH_DEBOUNCE_MS) {
     return;
   }
 
-  // If the touch is on the location name area, switch to next location
+  lastTouchRefreshMillis = millis();
+
   if (isTouchInLocationArea(touchX, touchY)) {
-    lastTouchRefreshMillis = millis();
     log_i("Location area touched. Switching location.");
     switchToNextLocation();
     return;
   }
 
-  // Otherwise, normal manual refresh
-  lastTouchRefreshMillis = millis();
   log_i("Manual refresh triggered by touch.");
-  repaint();
+  refreshCurrentLocationFromTouch();
+}
+
+void refreshCurrentLocationFromTouch() {
+  drawRefreshingOverlay();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    startWiFi();
+  }
+
+  // Only refresh the currently displayed location
+  updateLocationData(currentLocationIndex);
+
+  // Refresh primary location weather only if the current location is the primary one
+  if (currentLocationIndex == 0) {
+    updatePrimaryLocationData();
+  }
+
+  lastUpdateMillis = millis();
+  redrawScreenFromCache();
 }
 
 void setup(void) {
@@ -314,12 +387,7 @@ void loop(void) {
   handleTouchWake();
   handleDisplayBrightnessMode();
 
-  bool needsUpdate =
-      (lastTimeSyncMillis == 0 ||
-       lastUpdateMillis == 0 ||
-       (millis() - lastUpdateMillis) > updateIntervalMillis);
-
-  if (needsUpdate) {
+  if (shouldRunScheduledUpdate()) {
     repaint();
   }
 
@@ -327,6 +395,13 @@ void loop(void) {
   scheduler.execute();
 }
 
+OpenWeatherMapCurrentData& activeWeather() {
+  return locationCurrentWeather[currentLocationIndex];
+}
+
+OpenWeatherMapForecastData* activeForecasts() {
+  return locationForecasts[currentLocationIndex];
+}
 
 // ----------------------------------------------------------------------------
 // Functions
@@ -335,7 +410,7 @@ void drawAstro() {
   time_t tnow = time(nullptr);
   struct tm *nowUtc = gmtime(&tnow);
 
-  SunMoonCalc smCalc = SunMoonCalc(mkgmtime(nowUtc), currentWeather.lat, currentWeather.lon);
+  SunMoonCalc smCalc = SunMoonCalc(mkgmtime(nowUtc), activeWeather().lat, activeWeather().lon);
   const SunMoonCalc::Result result = smCalc.calculateSunAndMoonData();
 
   ofr.setFontSize(24);
@@ -371,11 +446,11 @@ void drawCurrentWeather() {
   String text = "";
 
   // weather icon
-  String weatherIcon = getWeatherIconName(currentWeather.weatherId, true);
+  String weatherIcon = getWeatherIconName(activeWeather().weatherId, true);
   ui.drawBmp("/weather/" + weatherIcon + ".bmp", 5, 125);
 
   // location name with dynamic font size
-  String locationText = currentLocationName;
+  String locationText = LOCATIONS[currentLocationIndex].displayName;
   if (locationText.length() <= 10) {
     ofr.setFontSize(16);
   } else if (locationText.length() <= 16) {
@@ -386,7 +461,7 @@ void drawCurrentWeather() {
   ofr.cdrawString(locationText.c_str(), centerWidth, 100);
 
   // weather description with dynamic font size
-  String desc = currentWeather.description;
+  String desc = activeWeather().description;
   desc.replace("ß", "ss");
 
   if (desc.length() <= 12) {
@@ -402,20 +477,20 @@ void drawCurrentWeather() {
   drawWeatherInfoBlock();
 
   // wind rose icon
-  int windAngleIndex = round(currentWeather.windDeg * 8 / 360);
+  int windAngleIndex = round(activeWeather().windDeg * 8 / 360);
   if (windAngleIndex > 7) windAngleIndex = 0;
   ui.drawBmp("/wind/" + WIND_ICON_NAMES[windAngleIndex] + ".bmp", tft.width() - 80, 125);
 
   // wind speed
   ofr.setFontSize(18);
-  text = String(currentWeather.windSpeed, 0);
+  text = String(activeWeather().windSpeed, 0);
   if (IS_METRIC) text += " m/s";
   else text += " mph";
   ofr.cdrawString(text.c_str(), tft.width() - 43, 200);
 }
 
 void drawForecast() {
-  DayForecast* dayForecasts = calculateDayForecasts(forecasts);
+  DayForecast* dayForecasts = calculateDayForecasts(activeForecasts());
   for (int i = 0; i < NUMBER_OF_DAY_FORECASTS; i++) {
     log_i("[%d] condition code: %d, hour: %d, temp: %.1f/%.1f", dayForecasts[i].day,
           dayForecasts[i].conditionCode, dayForecasts[i].conditionHour, dayForecasts[i].minTemp,
@@ -476,35 +551,34 @@ String getWeatherIconName(uint16_t id, bool today) {
 
   // For the 8xx group we also have night versions of the icons.
   // Switch to night icons? This could be written w/o if-else but it'd be less legible.
-  if ( today && id/100 == 8) {
-    if (today && (currentWeather.observationTime < currentWeather.sunrise ||
-                  currentWeather.observationTime > currentWeather.sunset)) {
+  if (today && id / 100 == 8) {
+    if (today && (activeWeather().observationTime < activeWeather().sunrise ||
+                  activeWeather().observationTime > activeWeather().sunset)) {
       id += 1000;
-    } else if(!today && false) {
+    } else if (!today && false) {
       // NOT-SUPPORTED-YET
       // We currently don't need the night icons for forecast.
       // Hence, we don't even track those properties in the DayForecast struct.
-      // forecast->dt[0] < forecast->sunrise || forecast->dt[0] > forecast->sunset
       id += 1000;
     }
   }
 
-  if (id/100 == 2) return "thunderstorm";
-  if (id/100 == 3) return "drizzle";
+  if (id / 100 == 2) return "thunderstorm";
+  if (id / 100 == 3) return "drizzle";
   if (id == 500) return "light-rain";
   if (id == 504) return "extrem-rain";
   else if (id == 511) return "sleet";
-  else if (id/100 == 5) return "rain";
+  else if (id / 100 == 5) return "rain";
   if (id >= 611 && id <= 616) return "sleet";
-  else if (id/100 == 6) return "snow";
-  if (id/100 == 7) return "fog";
+  else if (id / 100 == 6) return "snow";
+  if (id / 100 == 7) return "fog";
   if (id == 800) return "clear-day";
   if (id >= 801 && id <= 803) return "partly-cloudy-day";
-  else if (id/100 == 8) return "cloudy";
+  else if (id / 100 == 8) return "cloudy";
   // night icons
   if (id == 1800) return "clear-night";
   if (id == 1801) return "partly-cloudy-night";
-  else if (id/100 == 18) return "cloudy";
+  else if (id / 100 == 18) return "cloudy";
 
   return "unknown";
 }
@@ -541,7 +615,7 @@ bool pushImageToTft(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitm
 void syncTime() {
   if (initTime()) {
     lastTimeSyncMillis = millis();
-    setTimezone(currentLocationTimezone);
+    setTimezone(LOCATIONS[currentLocationIndex].timezone);
     log_i("Current local time: %s", getCurrentTimestamp(SYSTEM_TIMESTAMP_FORMAT).c_str());
   }
 }
@@ -562,11 +636,18 @@ void initialPaint() {
   drawProgress("Synchronizing time...", 30);
   syncTime();
 
-  updateData(true);
+  drawProgress("Loading locations...", 50);
+  for (uint8_t i = 0; i < NUMBER_OF_LOCATIONS; i++) {
+    updateLocationData(i);
+  }
+
   updatePrimaryLocationData();
 
   drawProgress("Ready", 100);
   lastUpdateMillis = millis();
+
+  currentLocationIndex = 0;
+  setTimezone(LOCATIONS[currentLocationIndex].timezone);
 
   tft.fillScreen(TFT_BLACK);
 
@@ -586,7 +667,6 @@ void initialPaint() {
 
   setDisplayBacklight(getTargetBrightness());
   currentBacklightBrightness = getTargetBrightness();
-
 }
 
 void repaint() {
@@ -613,36 +693,18 @@ void redrawScreenFromCache() {
 
 }
 
+
 void updateDataInBackground() {
   if (WiFi.status() != WL_CONNECTED) {
     startWiFi();
   }
 
   syncTime();
-  updateData(false);
+
+  updateLocationData(currentLocationIndex);
   updatePrimaryLocationData();
 
   lastUpdateMillis = millis();
-}
-
-void updateData(boolean updateProgressBar) {
-  if(updateProgressBar) drawProgress("Updating weather...", 70);
-  OpenWeatherMapCurrent *currentWeatherClient = new OpenWeatherMapCurrent();
-  currentWeatherClient->setMetric(IS_METRIC);
-  currentWeatherClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
-  currentWeatherClient->updateCurrentById(&currentWeather, OPEN_WEATHER_MAP_API_KEY, currentLocationId);
-  delete currentWeatherClient;
-  currentWeatherClient = nullptr;
-  log_i("Current weather in %s: %s, %.1f°", currentWeather.cityName.c_str(), currentWeather.description.c_str(), currentWeather.feelsLike);
-
-  if(updateProgressBar) drawProgress("Updating forecast...", 90);
-  OpenWeatherMapForecast *forecastClient = new OpenWeatherMapForecast();
-  forecastClient->setMetric(IS_METRIC);
-  forecastClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
-  forecastClient->setAllowedHours(forecastHoursUtc, sizeof(forecastHoursUtc));
-  forecastClient->updateForecastsById(forecasts, OPEN_WEATHER_MAP_API_KEY, currentLocationId, NUMBER_OF_FORECASTS);
-  delete forecastClient;
-  forecastClient = nullptr;
 }
 
 void updatePrimaryLocationData() {
@@ -660,30 +722,28 @@ void updatePrimaryLocationData() {
   primaryWeatherClient = nullptr;
 
   log_i("Primary location weather updated: %s, sunrise=%ld, sunset=%ld",
-        LOCATIONS[0].displayName.c_str(),
+        LOCATIONS[0].displayName,
         primaryLocationWeather.sunrise,
         primaryLocationWeather.sunset);
 }
 
 void switchToNextLocation() {
   currentLocationIndex = (currentLocationIndex + 1) % NUMBER_OF_LOCATIONS;
-  currentLocationName = LOCATIONS[currentLocationIndex].displayName;
-  currentLocationId = LOCATIONS[currentLocationIndex].locationId;
-  currentLocationTimezone = LOCATIONS[currentLocationIndex].timezone;
+  setTimezone(LOCATIONS[currentLocationIndex].timezone);
 
-  setTimezone(currentLocationTimezone);
+  log_i("Switched to cached location: %s (%s), timezone=%s",
+        LOCATIONS[currentLocationIndex].displayName,
+        LOCATIONS[currentLocationIndex].locationId,
+        LOCATIONS[currentLocationIndex].timezone);
 
-  log_i("Switched to location: %s (%s), timezone=%s",
-        currentLocationName.c_str(),
-        currentLocationId.c_str(),
-        currentLocationTimezone);
+  drawSwitchingLocationOverlay();
+  delay(150);
 
-  repaint();
+  redrawScreenFromCache();
 }
 
 bool isTouchInLocationArea(uint16_t x, uint16_t y) {
-  // tune these values on hardware
-  return (x >= 70 && x <= 250 && y >= 85 && y <= 115);
+  return (x >= 40 && x <= 280 && y >= 80 && y <= 130);
 }
 
 bool isPrimaryLocationSunDown() {
@@ -697,4 +757,63 @@ bool isPrimaryLocationSunDown() {
   }
 
   return (now < primaryLocationWeather.sunrise || now >= primaryLocationWeather.sunset);
+}
+
+bool isPrimaryLocationNightTime() {
+  int nowMinutes = getMinutesForTimezone(LOCATIONS[0].timezone);
+  if (nowMinutes < 0) {
+    return false;
+  }
+
+  int fromMinutes = DISPLAY_NIGHT_FROM_HOUR * 60 + DISPLAY_NIGHT_FROM_MINUTE;
+  int toMinutes   = DISPLAY_NIGHT_TO_HOUR * 60 + DISPLAY_NIGHT_TO_MINUTE;
+
+  if (fromMinutes == toMinutes) {
+    return false;
+  }
+
+  // same-day range
+  if (fromMinutes < toMinutes) {
+    return nowMinutes >= fromMinutes && nowMinutes < toMinutes;
+  }
+
+  // overnight range
+  return nowMinutes >= fromMinutes || nowMinutes < toMinutes;
+}
+
+void updateLocationData(uint8_t locationIndex) {
+  OpenWeatherMapCurrent *currentWeatherClient = new OpenWeatherMapCurrent();
+  currentWeatherClient->setMetric(IS_METRIC);
+  currentWeatherClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
+
+  currentWeatherClient->updateCurrentById(
+    &locationCurrentWeather[locationIndex],
+    OPEN_WEATHER_MAP_API_KEY,
+    LOCATIONS[locationIndex].locationId
+  );
+
+  delete currentWeatherClient;
+  currentWeatherClient = nullptr;
+
+  OpenWeatherMapForecast *forecastClient = new OpenWeatherMapForecast();
+  forecastClient->setMetric(IS_METRIC);
+  forecastClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
+  forecastClient->setAllowedHours(forecastHoursUtc, sizeof(forecastHoursUtc));
+
+  forecastClient->updateForecastsById(
+    locationForecasts[locationIndex],
+    OPEN_WEATHER_MAP_API_KEY,
+    LOCATIONS[locationIndex].locationId,
+    NUMBER_OF_FORECASTS
+  );
+
+  delete forecastClient;
+  forecastClient = nullptr;
+
+  locationHasData[locationIndex] = true;
+  locationLastUpdateMillis[locationIndex] = millis();
+
+  log_i("Updated location %s (%s)",
+        LOCATIONS[locationIndex].displayName,
+        LOCATIONS[locationIndex].locationId);
 }

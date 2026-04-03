@@ -11,6 +11,9 @@ const String MOON_PHASES[] = {"Nieuwe Maan", "Jonge Maansikkel", "Eerste Kwartie
                               "Volle Maan", "Krimpende Maan", "Laatste Kwartier", "Krimpende Maan"};
 
 const String FEELS_LIKE_LABEL = "Het voelt als";
+
+const String REFRESHING_LABEL = "Weer wordt vernieuwd...";
+const String SWITCHING_LOCATION_LABEL = "Locatie wordt gewisseld...";
 //	Nieuwe maan - vaak afgekort: NM.
 //  Wassende, sikkelvormige maan of jonge maansikkel.
 //  Eerste kwartier - afgekort: EK.

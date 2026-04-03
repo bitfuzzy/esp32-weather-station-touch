@@ -12,3 +12,6 @@ const String MOON_PHASES[] = {"Neumond", "zunehmender Sichelmond", "zunehmendes 
                               "Vollmond", "abnehmender Mond", "abnehmendes Viertel", "abnehmender Sichelmond"};
 
 const String FEELS_LIKE_LABEL = "Gefühlte";
+
+const String REFRESHING_LABEL = "Wetter wird aktualisiert...";
+const String SWITCHING_LOCATION_LABEL = "Standort wird gewechselt...";

@@ -11,3 +11,6 @@ const String MOON_PHASES[] = {"New Moon", "Waxing Crescent", "First Quarter", "W
                               "Full Moon", "Waning Gibbous", "Third quarter", "Waning Crescent"};
 
 const String FEELS_LIKE_LABEL = "Feels like";
+
+const String REFRESHING_LABEL = "Refreshing weather...";
+const String SWITCHING_LOCATION_LABEL = "Switching location...";

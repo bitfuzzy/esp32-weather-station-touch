@@ -17,26 +17,47 @@ See the documentation at https://docs.thingpulse.com/guides/esp32-color-kit-gran
 
 ## Enhancements in this fork
 
-This fork adds several usability and display improvements for the ESP32 WiFi Color Display Kit Grande weather station:
+This fork adds several usability and display improvements for the ESP32 WiFi Color Display Kit Grande weather station.
 
+### Display and brightness
 - configurable day / evening / night brightness
 - optional dynamic evening dimming based on the sunset of a primary location
 - fixed night brightness window
 - test override to force night brightness for tuning
+
+### Touch interaction
 - touch refresh
 - touch-based switching between predefined locations
-- per-location timezone switching for the displayed clock
-- rotating current temperature / feels-like view
-- multilingual feels-like label support (EN / DE / IT / NL)
-- dynamic text sizing for long weather descriptions and location names
-- improved current weather layout and spacing
-- fallback handling for unsupported special glyphs (e.g. German ß -> ss)
+- multilingual status popups for:
+  - refreshing weather
+  - switching location
 
-## Multi-location behavior
-
-- LOCATIONS[0] is treated as the primary/home location
-- the primary location controls evening dimming via sunrise/sunset
-- the currently selected location controls:
+### Multi-location support
+- predefined list of selectable locations
+- `LOCATIONS[0]` acts as the primary/home location
+- primary location controls dynamic evening dimming
+- currently selected location controls:
   - displayed weather
   - displayed local time
   - displayed location name
+- cached location switching for faster navigation between cities
+
+### Weather UI improvements
+- rotating current temperature / feels-like view
+- multilingual feels-like label support:
+  - English
+  - German
+  - Italian
+  - Dutch
+- dynamic text sizing for:
+  - location name
+  - weather description
+  - feels-like label
+- improved current weather layout:
+  - humidity and pressure on a single line
+  - visual separator between values
+- fallback handling for unsupported special glyphs (for example German `ß -> ss`)
+
+### Refresh behavior
+- lighter touch refresh path for improved responsiveness
+- scheduled updates configurable as 1–4 times per hour

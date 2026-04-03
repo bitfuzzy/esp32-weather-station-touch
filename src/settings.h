@@ -13,14 +13,18 @@
 //#include "translations/texts_nl.h"
 
 // WiFi Settings
-const char *SSID = "your-wifi-SSID-here";
-const char *WIFI_PWD = "your-wifi-password-here";
+const char *SSID = "BLASTER";
+const char *WIFI_PWD = "D3vH=NS+D5%pu$brryA%f=z";
 
 // timezone Europe/Berlin as per https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
 #define TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
 
-// how often to retreive new weather information
-#define UPDATE_INTERVAL_MINUTES 30
+// how often to retreive new weather information, valid options [1-4]
+//1 → at 00
+//2 → at 00, 30
+//3 → at 00, 20, 40
+//4 → at 00, 15, 30, 45
+#define UPDATES_PER_HOUR 4
 
 // uncomment to get "08/23/2022 02:55:02 pm" instead of "23.08.2022 14:55:02"
 // #define DATE_TIME_FORMAT_US
@@ -30,7 +34,7 @@ bool IS_METRIC = true;
 
 // OpenWeatherMap Settings
 // Sign up here to get an API key: https://docs.thingpulse.com/how-tos/openweathermap-key/
-const String OPEN_WEATHER_MAP_API_KEY = "your-openweather-api-key-here";
+const String OPEN_WEATHER_MAP_API_KEY = "f67f9f7dd1b7cb5fbb67ce399d229753";
 
 /*
 Go to https://openweathermap.org/find?q= and search for a location. Go through the
@@ -40,17 +44,17 @@ at the end is what you assign to the constant below.
  */
 //Define a location struct and list
 typedef struct {
-  String displayName;
-  String locationId;
+  const char* displayName;
+  const char* locationId;
   const char* timezone;
 } LocationDef;
 
 // Define a location list (Display Name, Openweather locationId and ESP32-friendly POSIX Timezone String )
 const LocationDef LOCATIONS[] = {
-  {"Monheim",   "2866930", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Rome",      "3169070", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"Sydney",    "2147714", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-  {"Anchorage", "5879400", "AKST9AKDT,M3.2.0,M11.1.0"}
+  {"BRETTEN", "2944200", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"CHICAGO", "4887398", "CST6CDT,M3.2.0,M11.1.0"},
+  {"PHOENIX", "5308655", "MST7"},
+  {"DARIEN", "4889447", "EST5EDT,M3.2.0,M11.1.0"},
 };
 
 const uint8_t NUMBER_OF_LOCATIONS = sizeof(LOCATIONS) / sizeof(LOCATIONS[0]);
@@ -63,9 +67,6 @@ const uint8_t NUMBER_OF_LOCATIONS = sizeof(LOCATIONS) / sizeof(LOCATIONS[0]);
 #define TFT_LED_BRIGHTNESS_DAY     200
 #define TFT_LED_BRIGHTNESS_EVENING 80
 #define TFT_LED_BRIGHTNESS_NIGHT   10
-
-#define DISPLAY_EVENING_FROM_HOUR   18
-#define DISPLAY_EVENING_FROM_MINUTE 0
 
 // startup brightness
 #define TFT_LED_BRIGHTNESS TFT_LED_BRIGHTNESS_DAY

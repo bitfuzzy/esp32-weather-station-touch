@@ -11,3 +11,6 @@ const String MOON_PHASES[] = {"Luna nuova", "Luna crescente", "Primo quarto", "G
                               "Luna piena", "Gibbosa calante", "Terzo quarto", "Luna calante"};
 
 const String FEELS_LIKE_LABEL = "Si sente come";
+
+const String REFRESHING_LABEL = "Aggiornamento meteo...";
+const String SWITCHING_LOCATION_LABEL = "Cambio localita...";
