@@ -13,8 +13,8 @@
 //#include "translations/texts_nl.h"
 
 // WiFi Settings
-const char *SSID = "BLASTER";
-const char *WIFI_PWD = "D3vH=NS+D5%pu$brryA%f=z";
+const char *SSID = "your-wifi-SSID-here";
+const char *WIFI_PWD = "your-wifi-password-here";
 
 // timezone Europe/Berlin as per https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
 #define TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
@@ -34,7 +34,7 @@ bool IS_METRIC = true;
 
 // OpenWeatherMap Settings
 // Sign up here to get an API key: https://docs.thingpulse.com/how-tos/openweathermap-key/
-const String OPEN_WEATHER_MAP_API_KEY = "f67f9f7dd1b7cb5fbb67ce399d229753";
+const String OPEN_WEATHER_MAP_API_KEY = "your-openweather-api-key-here";
 
 /*
 Go to https://openweathermap.org/find?q= and search for a location. Go through the
@@ -51,10 +51,10 @@ typedef struct {
 
 // Define a location list (Display Name, Openweather locationId and ESP32-friendly POSIX Timezone String )
 const LocationDef LOCATIONS[] = {
-  {"BRETTEN", "2944200", "CET-1CEST,M3.5.0,M10.5.0/3"},
-  {"CHICAGO", "4887398", "CST6CDT,M3.2.0,M11.1.0"},
-  {"PHOENIX", "5308655", "MST7"},
-  {"DARIEN", "4889447", "EST5EDT,M3.2.0,M11.1.0"},
+  {"Monheim",   "2866930", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Rome",      "3169070", "CET-1CEST,M3.5.0,M10.5.0/3"},
+  {"Sydney",    "2147714", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+  {"Anchorage", "5879400", "AKST9AKDT,M3.2.0,M11.1.0"}
 };
 
 const uint8_t NUMBER_OF_LOCATIONS = sizeof(LOCATIONS) / sizeof(LOCATIONS[0]);
