@@ -14,3 +14,12 @@ const String FEELS_LIKE_LABEL = "Si sente come";
 
 const String REFRESHING_LABEL = "Aggiornamento meteo...";
 const String SWITCHING_LOCATION_LABEL = "Cambio localita...";
+
+const String ALREADY_UP_TO_DATE_LABEL = "Gia aggiornato";
+
+const String TREND_WARMING_LABEL = "Piu caldo";
+const String TREND_COOLING_LABEL = "Piu freddo";
+const String TREND_STABLE_LABEL = "Stabile";
+const String RAIN_LABEL = "Pioggia";
+
+const String UPDATED_LABEL = "Upd";

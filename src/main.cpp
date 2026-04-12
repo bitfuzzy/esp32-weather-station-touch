@@ -20,6 +20,8 @@
 #include "persistence.h"
 #include "settings.h"
 #include "util.h"
+#include <time.h>
+#include <esp_system.h>
 
 
 
@@ -55,6 +57,16 @@ unsigned long lastWeatherInfoSwitchMillis = 0;
 
 uint8_t currentLocationIndex = 0;
 
+unsigned long lastManualRefreshMillis = 0;
+
+//statusbox globals
+int lastStatusBoxX = 0;
+int lastStatusBoxY = 0;
+int lastStatusBoxW = 0;
+int lastStatusBoxH = 0;
+
+time_t locationLastUpdateEpoch[NUMBER_OF_LOCATIONS] = {0};
+
 // ----------------------------------------------------------------------------
 // Function prototypes (declarations)
 // ----------------------------------------------------------------------------
@@ -62,6 +74,7 @@ void drawAstro();
 void drawCurrentWeather();
 void drawForecast();
 void drawProgress(const char *text, int8_t percentage);
+void drawSeparator(uint16_t y);
 void drawTimeAndDate();
 String getWeatherIconName(uint16_t id, bool today);
 void initJpegDecoder();
@@ -92,10 +105,27 @@ bool isTouchInLocationArea(uint16_t x, uint16_t y);
 void refreshCurrentLocationFromTouch();
 
 void updateLocationData(uint8_t locationIndex);
+void updateLocationCurrentOnly(uint8_t locationIndex);
 
 void drawStatusOverlay(const String& message);
 void drawRefreshingOverlay();
 void drawSwitchingLocationOverlay();
+
+void drawAlreadyUpToDateOverlay();
+
+String getTemperatureTrendLabel();
+int getRainProbabilityPercent();
+
+int getTemperatureTrendDirection();
+void drawTrendIcon(int centerX, int centerY, int direction);
+
+void drawLocationPinIcon(int x, int y);
+
+String getTemperatureTrendDisplayText();
+
+int getTrendIconVisualOffset(int direction);
+
+int getTrendIconVisualOffset(int direction);
 
 OpenWeatherMapCurrentData& activeWeather();
 OpenWeatherMapForecastData* activeForecasts();
@@ -141,29 +171,33 @@ bool shouldRunScheduledUpdate() {
 }
 
 void drawWeatherInfoBlock() {
+  const int mainTempY = 145;
+  const int subLineY  = 195;
+  const int trendY    = 160;
+  const int rainY     = 188;
+
   String text = "";
 
-  // clear only the temperature/info area before redrawing it
+  // Clear only the rotating info area
   // Tuned on real hardware to avoid clipping the location/description and cloud icon.
   tft.fillRect(WEATHER_INFO_CLEAR_X,
-             WEATHER_INFO_CLEAR_Y,
-             WEATHER_INFO_CLEAR_WIDTH,
-             WEATHER_INFO_CLEAR_HEIGHT,
-             TFT_BLACK);
+               WEATHER_INFO_CLEAR_Y,
+               WEATHER_INFO_CLEAR_WIDTH,
+               WEATHER_INFO_CLEAR_HEIGHT,
+               TFT_BLACK);
 
   if (weatherInfoMode == 0) {
-    // actual temperature
+    // --------------------------------------------------
+    // Screen 1: actual temperature + humidity / pressure
+    // --------------------------------------------------
     ofr.setFontSize(44);
     text = String(activeWeather().temp, 1) + "°";
-    ofr.cdrawString(text.c_str(), centerWidth + 10, 145);
+    ofr.cdrawString(text.c_str(), centerWidth + 10, mainTempY);
 
-    // humidity + pressure on one row with custom dot separator
     ofr.setFontSize(16);
 
-    String hum = String(activeWeather().humidity) + "%";
+    String hum  = String(activeWeather().humidity) + "%";
     String pres = String(activeWeather().pressure) + "hPa";
-
-    int infoY = 195;
 
     int humCenterX = centerWidth - 34;
     int presCenterX = centerWidth + 34;
@@ -171,24 +205,25 @@ void drawWeatherInfoBlock() {
     int humWidth = ofr.getTextWidth(hum.c_str());
     int presWidth = ofr.getTextWidth(pres.c_str());
 
-    ofr.cdrawString(hum.c_str(), humCenterX, infoY);
-    ofr.cdrawString(pres.c_str(), presCenterX, infoY);
+    ofr.cdrawString(hum.c_str(), humCenterX, subLineY);
+    ofr.cdrawString(pres.c_str(), presCenterX, subLineY);
 
     int humRightEdge = humCenterX + (humWidth / 2);
     int presLeftEdge = presCenterX - (presWidth / 2);
 
     int dotX = ((humRightEdge + presLeftEdge) / 2) + 3;
-    int dotY = infoY + 12;
-    int dotRadius = 2;
+    int dotY = subLineY + 12;
 
-    tft.fillCircle(dotX, dotY, dotRadius, TFT_WHITE);
-  } else {
-    // feels like temperature
+    tft.fillCircle(dotX, dotY, 2, TFT_WHITE);
+
+  } else if (weatherInfoMode == 1) {
+    // ---------------------------------------
+    // Screen 2: feels like temperature + text
+    // ---------------------------------------
     ofr.setFontSize(44);
     String feelsLikeTemp = String(activeWeather().feelsLike, 1) + "°";
-    ofr.cdrawString(feelsLikeTemp.c_str(), centerWidth + 10, 145);
+    ofr.cdrawString(feelsLikeTemp.c_str(), centerWidth + 10, mainTempY);
 
-    // second line label
     String feelsLikeText = FEELS_LIKE_LABEL;
 
     if (feelsLikeText.length() <= 12) {
@@ -199,7 +234,50 @@ void drawWeatherInfoBlock() {
       ofr.setFontSize(12);
     }
 
-    ofr.cdrawString(feelsLikeText.c_str(), centerWidth, 195);
+    ofr.cdrawString(feelsLikeText.c_str(), centerWidth, subLineY);
+
+  } else {
+    // ------------------------------------
+    // Screen 3: trend + rain probability
+    // ------------------------------------
+    String trendText = getTemperatureTrendLabel();
+    String rainText  = RAIN_LABEL + " " + String(getRainProbabilityPercent()) + "%";
+
+    int direction = getTemperatureTrendDirection();
+
+    int trendFontSize;
+    if (trendText.length() <= 10) {
+      trendFontSize = 22;
+    } else if (trendText.length() <= 14) {
+      trendFontSize = 20;
+    } else {
+      trendFontSize = 16;
+    }
+
+    ofr.setFontSize(trendFontSize);
+
+    // Center combined block: icon + gap + text
+    int iconW = 16;
+    int gap = 6;
+    int textWidth = ofr.getTextWidth(trendText.c_str());
+    int totalWidth = iconW + gap + textWidth;
+    int startX = centerWidth - (totalWidth / 2);
+
+    // Draw icon first
+    int iconCenterX = startX + (iconW / 2);
+    drawTrendIcon(iconCenterX, trendY + 16, direction);
+
+    // Draw text after icon
+    int textX = startX + iconW + gap;
+    ofr.drawString(trendText.c_str(), textX, trendY);
+
+    // Draw rain line
+    if (rainText.length() <= 14) {
+      ofr.setFontSize(18);
+    } else {
+      ofr.setFontSize(16);
+    }
+    ofr.cdrawString(rainText.c_str(), centerWidth, rainY);
   }
 }
 
@@ -219,10 +297,26 @@ void drawStatusOverlay(const String& message) {
   int boxX = (tft.width() - boxW) / 2;
   int boxY = 215;
 
+  lastStatusBoxX = boxX;
+  lastStatusBoxY = boxY;
+  lastStatusBoxW = boxW;
+  lastStatusBoxH = boxH;
+
   tft.fillRoundRect(boxX, boxY, boxW, boxH, 6, TFT_BLACK);
   tft.drawRoundRect(boxX, boxY, boxW, boxH, 6, TFT_WHITE);
 
   ofr.cdrawString(message.c_str(), centerWidth, boxY + 6);
+}
+
+void clearStatusOverlay() {
+  // Clear the popup area
+  tft.fillRect(lastStatusBoxX - 2, lastStatusBoxY - 2,
+               lastStatusBoxW + 4, lastStatusBoxH + 4,
+               TFT_BLACK);
+
+  // Restore only the UI parts the popup overlaps
+  drawSeparator(230);
+  drawForecast();
 }
 
 void drawRefreshingOverlay() {
@@ -233,6 +327,23 @@ void drawSwitchingLocationOverlay() {
   drawStatusOverlay(SWITCHING_LOCATION_LABEL);
 }
 
+void drawAlreadyUpToDateOverlay() {
+  drawStatusOverlay(ALREADY_UP_TO_DATE_LABEL);
+}
+
+void drawLocationPinIcon(int x, int y) {
+  // small location pin:
+  // circle on top + pointed tail
+  tft.drawCircle(x, y, 4, TFT_WHITE);
+  tft.fillCircle(x, y, 2, TFT_WHITE);
+  tft.fillTriangle(x - 3, y + 3,
+                   x + 3, y + 3,
+                   x,     y + 9,
+                   TFT_WHITE);
+}
+
+void clearStatusOverlay();
+
 void handleWeatherInfoRotation() {
   if (!WEATHER_INFO_ROTATION_ENABLED) {
     return;
@@ -240,19 +351,23 @@ void handleWeatherInfoRotation() {
 
   if ((millis() - lastWeatherInfoSwitchMillis) >= WEATHER_INFO_ROTATION_INTERVAL_MS) {
     lastWeatherInfoSwitchMillis = millis();
-    weatherInfoMode = (weatherInfoMode + 1) % 2;
+    weatherInfoMode = (weatherInfoMode + 1) % 3;
 
     if (WEATHER_INFO_ANIMATION_ENABLED) {
-      // simple pseudo-fade: clear info area, short pause, redraw
-      // Tuned on real hardware to avoid clipping the location/description and cloud icon.
+      // Step 1: clear the info area
       tft.fillRect(WEATHER_INFO_CLEAR_X,
-             WEATHER_INFO_CLEAR_Y,
-             WEATHER_INFO_CLEAR_WIDTH,
-             WEATHER_INFO_CLEAR_HEIGHT,
-             TFT_BLACK);
-      delay(WEATHER_INFO_ANIMATION_DELAY_MS);
+                   WEATHER_INFO_CLEAR_Y,
+                   WEATHER_INFO_CLEAR_WIDTH,
+                   WEATHER_INFO_CLEAR_HEIGHT,
+                   TFT_BLACK);
+      delay(40);
+
+      // Step 2: redraw separator line for clean visual continuity
+      drawSeparator(230);
+      delay(20);
     }
 
+    // Step 3: draw the next info screen
     drawWeatherInfoBlock();
   }
 }
@@ -337,32 +452,112 @@ void handleTouchWake() {
     return;
   }
 
-  log_i("Manual refresh triggered by touch.");
+  unsigned long dataAge = millis() - locationLastUpdateMillis[currentLocationIndex];
+  if (dataAge < TOUCH_REFRESH_MIN_INTERVAL_MS) {
+    log_i("Manual refresh ignored because data is still fresh.");
+    drawAlreadyUpToDateOverlay();
+    delay(600);
+    clearStatusOverlay();
+    return;
+  }
+
+   log_i("Manual refresh triggered by touch.");
   refreshCurrentLocationFromTouch();
 }
 
 void refreshCurrentLocationFromTouch() {
+  log_i("Free heap before touch refresh: %u", ESP.getFreeHeap());
+
   drawRefreshingOverlay();
 
   if (WiFi.status() != WL_CONNECTED) {
     startWiFi();
   }
 
-  // Only refresh the currently displayed location
-  updateLocationData(currentLocationIndex);
+  // Fast manual refresh: current conditions only
+  updateLocationCurrentOnly(currentLocationIndex);
 
-  // Refresh primary location weather only if the current location is the primary one
+  // Only refresh primary-location brightness data if we are on the primary location
   if (currentLocationIndex == 0) {
     updatePrimaryLocationData();
   }
 
   lastUpdateMillis = millis();
   redrawScreenFromCache();
+
+  log_i("Free heap after touch refresh: %u", ESP.getFreeHeap());
+}
+
+int getRainProbabilityPercent() {
+  int rainyBlocks = 0;
+  int blocksToCheck = 8; // next 24 hours
+
+  OpenWeatherMapForecastData* forecasts = activeForecasts();
+
+  for (int i = 0; i < blocksToCheck; i++) {
+    uint16_t weatherId = forecasts[i].weatherId;
+
+    if ((weatherId >= 200 && weatherId < 700)) {
+      rainyBlocks++;
+    }
+  }
+
+  return round((rainyBlocks * 100.0) / blocksToCheck);
+}
+
+String getTemperatureTrendDisplayText() {
+  float diff = activeWeather().temp - activeWeather().feelsLike;
+
+  // feels-like lower than actual -> feels colder
+  if (diff >= 1.0) {
+    return "↓ " + TREND_COOLING_LABEL;
+  }
+
+  // feels-like higher than actual -> feels warmer
+  if (diff <= -1.0) {
+    return "↑ " + TREND_WARMING_LABEL;
+  }
+
+  return "→ " + TREND_STABLE_LABEL;
+}
+
+String getLastUpdatedTimeString() {
+  time_t ts = locationLastUpdateEpoch[currentLocationIndex];
+  if (ts <= 0) {
+    return "--:--";
+  }
+
+  struct tm timeinfo;
+  localtime_r(&ts, &timeinfo);
+
+  char buf[6];
+  strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
+  return String(buf);
+}
+
+
+const char* getResetReasonText(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON:   return "Power-on";
+    case ESP_RST_EXT:       return "External pin";
+    case ESP_RST_SW:        return "Software reset";
+    case ESP_RST_PANIC:     return "Panic / exception";
+    case ESP_RST_INT_WDT:   return "Interrupt watchdog";
+    case ESP_RST_TASK_WDT:  return "Task watchdog";
+    case ESP_RST_WDT:       return "Other watchdog";
+    case ESP_RST_DEEPSLEEP: return "Deep sleep wake";
+    case ESP_RST_BROWNOUT:  return "Brownout";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "Unknown";
+  }
 }
 
 void setup(void) {
   Serial.begin(115200);
   delay(1000);
+
+  esp_reset_reason_t reason = esp_reset_reason();
+  log_i("Reset reason: %s (%d)", getResetReasonText(reason), reason);
 
   logBanner();
   logMemoryStats();
@@ -381,6 +576,34 @@ void setup(void) {
   clockTask.enable();
 
   initialPaint();
+}
+
+
+void drawTrendIcon(int centerX, int centerY, int direction) {
+  if (direction > 0) {
+    // Up arrow
+    tft.fillTriangle(centerX,     centerY - 8,
+                     centerX - 5, centerY - 1,
+                     centerX + 5, centerY - 1,
+                     TFT_WHITE);
+    tft.fillRect(centerX - 1, centerY - 1, 3, 10, TFT_WHITE);
+
+  } else if (direction < 0) {
+    // Down arrow
+    tft.fillTriangle(centerX,     centerY + 8,
+                     centerX - 5, centerY + 1,
+                     centerX + 5, centerY + 1,
+                     TFT_WHITE);
+    tft.fillRect(centerX - 1, centerY - 9, 3, 10, TFT_WHITE);
+
+  } else {
+    // Right arrow for stable
+    tft.fillTriangle(centerX + 8, centerY,
+                     centerX + 1, centerY - 5,
+                     centerX + 1, centerY + 5,
+                     TFT_WHITE);
+    tft.fillRect(centerX - 8, centerY - 1, 10, 3, TFT_WHITE);
+  }
 }
 
 void loop(void) {
@@ -402,6 +625,63 @@ OpenWeatherMapCurrentData& activeWeather() {
 OpenWeatherMapForecastData* activeForecasts() {
   return locationForecasts[currentLocationIndex];
 }
+
+int getTemperatureTrendDirection() {
+  float currentTemp = activeWeather().temp;
+
+  // Use the forecast ~6 hours ahead for a more meaningful trend
+  // forecasts[0] is usually the nearest upcoming forecast block
+  // forecasts[1] is roughly +3h
+  // forecasts[2] is roughly +6h
+  OpenWeatherMapForecastData* forecasts = activeForecasts();
+  float futureTemp = forecasts[1].temp;
+
+  float diff = futureTemp - currentTemp;
+
+  log_i("Trend check: current=%.1f, future=%.1f, diff=%.1f",
+        currentTemp, futureTemp, diff);
+
+  if (diff >= 1.0) {
+    return 1;   // warming
+  }
+
+  if (diff <= -1.0) {
+    return -1;  // cooling
+  }
+
+  return 0;     // stable
+}
+
+int getTrendIconVisualOffset(int direction) {
+  if (direction > 0) {
+    return 0;   // warming (up arrow looks fine)
+  }
+
+  if (direction < 0) {
+    return -2;  // cooling (down arrow looks slightly too far right)
+  }
+
+  return 1;     // stable (right arrow can sit slightly right)
+}
+
+String getTemperatureTrendLabel() {
+  int direction = getTemperatureTrendDirection();
+
+  if (direction > 0) {
+    return TREND_WARMING_LABEL;
+  }
+
+  if (direction < 0) {
+    return TREND_COOLING_LABEL;
+  }
+
+  return TREND_STABLE_LABEL;
+}
+
+String getUpdatedLabel() {
+  return UPDATED_LABEL;
+}
+
 
 // ----------------------------------------------------------------------------
 // Functions
@@ -449,8 +729,9 @@ void drawCurrentWeather() {
   String weatherIcon = getWeatherIconName(activeWeather().weatherId, true);
   ui.drawBmp("/weather/" + weatherIcon + ".bmp", 5, 125);
 
-  // location name with dynamic font size
+  // location name with dynamic font size + pin icon
   String locationText = LOCATIONS[currentLocationIndex].displayName;
+
   if (locationText.length() <= 10) {
     ofr.setFontSize(16);
   } else if (locationText.length() <= 16) {
@@ -458,7 +739,18 @@ void drawCurrentWeather() {
   } else {
     ofr.setFontSize(12);
   }
-  ofr.cdrawString(locationText.c_str(), centerWidth, 100);
+
+  int locationTextWidth = ofr.getTextWidth(locationText.c_str());
+  int pinGap = 8;
+  int pinBlockWidth = 12;  // width reserved for pin icon
+  int totalWidth = pinBlockWidth + pinGap + locationTextWidth;
+  int startX = centerWidth - (totalWidth / 2);
+
+  // draw pin icon
+  drawLocationPinIcon(startX + 5, 106);
+
+  // draw location text
+  ofr.drawString(locationText.c_str(), startX + pinBlockWidth + pinGap, 100);
 
   // weather description with dynamic font size
   String desc = activeWeather().description;
@@ -695,6 +987,8 @@ void redrawScreenFromCache() {
 
 
 void updateDataInBackground() {
+  log_i("Free heap before background update: %u", ESP.getFreeHeap());
+
   if (WiFi.status() != WL_CONNECTED) {
     startWiFi();
   }
@@ -705,21 +999,20 @@ void updateDataInBackground() {
   updatePrimaryLocationData();
 
   lastUpdateMillis = millis();
+
+  log_i("Free heap after background update: %u", ESP.getFreeHeap());
 }
 
 void updatePrimaryLocationData() {
-  OpenWeatherMapCurrent *primaryWeatherClient = new OpenWeatherMapCurrent();
-  primaryWeatherClient->setMetric(IS_METRIC);
-  primaryWeatherClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
+  OpenWeatherMapCurrent primaryWeatherClient;
+  primaryWeatherClient.setMetric(IS_METRIC);
+  primaryWeatherClient.setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
 
-  primaryWeatherClient->updateCurrentById(
+  primaryWeatherClient.updateCurrentById(
     &primaryLocationWeather,
     OPEN_WEATHER_MAP_API_KEY,
     LOCATIONS[0].locationId
   );
-
-  delete primaryWeatherClient;
-  primaryWeatherClient = nullptr;
 
   log_i("Primary location weather updated: %s, sunrise=%ld, sunset=%ld",
         LOCATIONS[0].displayName,
@@ -737,7 +1030,7 @@ void switchToNextLocation() {
         LOCATIONS[currentLocationIndex].timezone);
 
   drawSwitchingLocationOverlay();
-  delay(150);
+  delay(200);
 
   redrawScreenFromCache();
 }
@@ -782,38 +1075,66 @@ bool isPrimaryLocationNightTime() {
 }
 
 void updateLocationData(uint8_t locationIndex) {
-  OpenWeatherMapCurrent *currentWeatherClient = new OpenWeatherMapCurrent();
-  currentWeatherClient->setMetric(IS_METRIC);
-  currentWeatherClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
+  OpenWeatherMapCurrent currentWeatherClient;
+  currentWeatherClient.setMetric(IS_METRIC);
+  currentWeatherClient.setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
 
-  currentWeatherClient->updateCurrentById(
+  currentWeatherClient.updateCurrentById(
     &locationCurrentWeather[locationIndex],
     OPEN_WEATHER_MAP_API_KEY,
     LOCATIONS[locationIndex].locationId
   );
 
-  delete currentWeatherClient;
-  currentWeatherClient = nullptr;
+  OpenWeatherMapForecast forecastClient;
+  forecastClient.setMetric(IS_METRIC);
+  forecastClient.setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
+  forecastClient.setAllowedHours(forecastHoursUtc, sizeof(forecastHoursUtc));
 
-  OpenWeatherMapForecast *forecastClient = new OpenWeatherMapForecast();
-  forecastClient->setMetric(IS_METRIC);
-  forecastClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
-  forecastClient->setAllowedHours(forecastHoursUtc, sizeof(forecastHoursUtc));
-
-  forecastClient->updateForecastsById(
+  forecastClient.updateForecastsById(
     locationForecasts[locationIndex],
     OPEN_WEATHER_MAP_API_KEY,
     LOCATIONS[locationIndex].locationId,
     NUMBER_OF_FORECASTS
   );
 
-  delete forecastClient;
-  forecastClient = nullptr;
-
-  locationHasData[locationIndex] = true;
+  // Mark this location cache as freshly updated
   locationLastUpdateMillis[locationIndex] = millis();
+  locationLastUpdateEpoch[locationIndex] = time(nullptr);
+  locationHasData[locationIndex] = true;
 
   log_i("Updated location %s (%s)",
         LOCATIONS[locationIndex].displayName,
         LOCATIONS[locationIndex].locationId);
+}
+
+void updateLocationCurrentOnly(uint8_t locationIndex) {
+  OpenWeatherMapCurrent currentWeatherClient;
+  currentWeatherClient.setMetric(IS_METRIC);
+  currentWeatherClient.setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
+
+  currentWeatherClient.updateCurrentById(
+    &locationCurrentWeather[locationIndex],
+    OPEN_WEATHER_MAP_API_KEY,
+    LOCATIONS[locationIndex].locationId
+  );
+
+  locationHasData[locationIndex] = true;
+  locationLastUpdateMillis[locationIndex] = millis();
+  locationLastUpdateEpoch[locationIndex] = time(nullptr);
+
+  log_i("Updated current weather only for %s (%s)",
+        LOCATIONS[locationIndex].displayName,
+        LOCATIONS[locationIndex].locationId);
+}
+
+void drawLastUpdatedLabel() {
+  String label = getUpdatedLabel() + " " + getLastUpdatedTimeString();
+
+  ofr.setFontSize(12);
+
+  int textWidth = ofr.getTextWidth(label.c_str());
+  int x = tft.width() - textWidth - 8;
+  int y = tft.height() - 16;
+
+  ofr.drawString(label.c_str(), x, y);
 }
